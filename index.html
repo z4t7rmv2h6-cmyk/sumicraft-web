@@ -1633,6 +1633,104 @@ if(quickVideoHost){const area=document.createElement("div");area.className="quic
  $("videoCalculatedQuick").querySelectorAll("[data-quick-vid]").forEach(btn=>btn.onclick=()=>{activeVideoId=btn.dataset.quickVid;renderVideoLibrary();requestAnimationFrame(()=>$("recipeSummaryPanel")?.scrollIntoView({behavior:"smooth",block:"start"}))})};
 }
 
+
+// SumiCraft v18 — all-data backup/restore and companion checklist.
+function flushLocalDraft(){
+ try{if(saveTimer){clearTimeout(saveTimer);saveTimer=null}localStorage.setItem('sumicraft-v2',JSON.stringify(serialize()));if(!suspendLibrary&&currentProjectId)saveDraftToLibrary()}catch(e){console.warn('local autosave',e)}
+}
+function backupAllData(){
+ flushLocalDraft();
+ const keys=[LIBRARY_KEY,'sumicraft-v2',GUIDE_KEY,VIDEO_KEY],entries={};
+ for(const k of keys)entries[k]=localStorage.getItem(k);
+ const blob=new Blob([JSON.stringify({format:'SumiCraftFullBackup',version:1,createdAt:new Date().toISOString(),entries},null,2)],{type:'application/json'});
+ const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='SumiCraft_全データ_'+new Date().toISOString().slice(0,10)+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),3000);toast('全データをバックアップしました');
+}
+$('backupAllBtn').onclick=backupAllData;
+$('restoreAllBtn').onclick=()=>$('restoreAllInput').click();
+$('restoreAllInput').onchange=async e=>{
+ const file=e.target.files?.[0];e.target.value='';if(!file)return;
+ try{
+  if(file.size>20*1024*1024)throw Error('容量は20MBまで');
+  const v=JSON.parse(await file.text()),keys=[LIBRARY_KEY,'sumicraft-v2',GUIDE_KEY,VIDEO_KEY];
+  if(v.format!=='SumiCraftFullBackup'||v.version!==1||!v.entries||!keys.every(k=>v.entries[k]===null||typeof v.entries[k]==='string'))throw Error('全データのバックアップファイルではありません');
+  for(const k of keys)if(v.entries[k]!==null)JSON.parse(v.entries[k]);
+  confirmDialog('全データを復元しますか？','今このブラウザにある全作品・動画・チェック状況が上書きされます。先に現在のデータもバックアップしてね。',()=>{
+   try{for(const k of keys){if(v.entries[k]===null)localStorage.removeItem(k);else localStorage.setItem(k,v.entries[k])}location.reload()}catch(err){toast('復元失敗: '+err.message)}
+  });
+ }catch(err){toast('復元できません: '+err.message)}
+};
+window.addEventListener('pagehide',()=>{if(saveTimer)flushLocalDraft()});
+let checklistWin=null,checklistMode='raw',checklistVideoId=null,checklistWindowType='popup';
+function getCompanionData(){
+ if(checklistMode==='guide'){
+  const counts=countMaterials().counts,ready=getGuideReady();
+  return {title:state.name||'建築の材料',rows:BLOCKS.filter(b=>counts[b.id]).map(b=>({key:String(b.id),name:b.name,count:counts[b.id],done:ready[b.id]===counts[b.id]}))};
+ }
+ const vid=videoList().find(v=>v.id===checklistVideoId)||videoActive()||videoList()[0];
+ if(!vid)return {title:'まだ登録動画がありません',rows:[]};
+ if(checklistMode==='finished')return {title:vid.title,rows:(vid.items||[]).map(m=>({key:String(m.id),name:m.name,count:m.count||0,done:!!m.ready}))};
+ const total=computedCraftingList(vid.items||[],vid.recipeWood||'オークの板材');
+ return {title:vid.title,rows:total.rows.map(m=>({key:iconReadyKey(m.name),name:m.name,count:m.count,done:Number(vid.rawReady?.[iconReadyKey(m.name)])===m.count}))};
+}
+function refreshCompanion(){
+ if(!checklistWin||checklistWin.closed)return;
+ const doc=checklistWin.document,root=doc.getElementById('sumiCompanion');if(!root)return;
+ const videos=videoList(),current=videos.find(v=>v.id===checklistVideoId);
+ if(!current&&videos.length)checklistVideoId=videos[0].id;
+ const data=getCompanionData(),done=data.rows.filter(r=>r.done).length;
+ root.replaceChildren();
+ const heading=doc.createElement('h1');heading.textContent='☑ SumiCraft チェックリスト';root.append(heading);
+ const progress=doc.createElement('p');progress.className='progress';progress.textContent='準備済み '+done+' / '+data.rows.length+'種類';root.append(progress);
+ const opts=doc.createElement('div');opts.className='options';
+ const mode=doc.createElement('select');for(const [value,label] of [['raw','集める最終材料'],['finished','動画の完成品'],['guide','建築設計の材料']]){const option=doc.createElement('option');option.value=value;option.textContent=label;mode.append(option)}mode.value=checklistMode;mode.onchange=()=>{checklistMode=mode.value;refreshCompanion()};opts.append(mode);
+ if(checklistMode!=='guide'){const videoSelect=doc.createElement('select');for(const video of videos){const option=doc.createElement('option');option.value=video.id;option.textContent=video.title;videoSelect.append(option)}if(checklistVideoId)videoSelect.value=checklistVideoId;videoSelect.onchange=()=>{checklistVideoId=videoSelect.value;refreshCompanion()};opts.append(videoSelect)}
+ root.append(opts);
+ const label=doc.createElement('h2');label.textContent=data.title;root.append(label);
+ const bar=doc.createElement('div');bar.className='bar';const fill=doc.createElement('div');fill.style.width=(data.rows.length?done*100/data.rows.length:0)+'%';bar.append(fill);root.append(bar);
+ const list=doc.createElement('div');list.className='list';
+ for(const item of data.rows){
+  const row=doc.createElement('label');row.className='row'+(item.done?' done':'');
+  const box=doc.createElement('input');box.type='checkbox';box.checked=item.done;
+  const name=doc.createElement('span');name.textContent=item.name;name.className='name';
+  const number=doc.createElement('span');number.className='number';number.textContent=item.count.toLocaleString('ja-JP')+'個';
+  const small=doc.createElement('small');small.textContent=stackDisplay(item.count);number.append(small);
+  box.onchange=()=>{
+   try{
+    if(checklistMode==='guide'){
+     const ready=getGuideReady(),id=Number(item.key);if(box.checked)ready[id]=item.count;else delete ready[id];saveGuideReady(ready);if(activeScreen==='guide')renderGuideMaterials();
+    }else{
+     const data=videoList(),v=data.find(v=>v.id===checklistVideoId);if(!v)return;
+     if(checklistMode==='finished'){const m=(v.items||[]).find(m=>String(m.id)===item.key);if(m)m.ready=box.checked}
+     else{v.rawReady ||= {};if(box.checked)v.rawReady[item.key]=item.count;else delete v.rawReady[item.key]}
+     v.modified=Date.now();videoSaveAll(data);
+     if(activeScreen==='videos'){if(activeVideoId===v.id)renderVideoChecklist();renderVideoLibrary()}
+    }
+   }catch(err){console.warn(err)}refreshCompanion();
+  };
+  row.append(box,name,number);list.append(row);
+ }
+ if(!data.rows.length){const e=doc.createElement('p');e.textContent='材料がありません。SumiCraftで登録してね。';list.append(e)}
+ root.append(list);
+ const note=doc.createElement('p');note.className='note';note.textContent=checklistWindowType==='pip'?'Chrome対応環境ではゲームの手前に表示できます。フルスクリーンのゲームでは隠れることがあります。':'通常の別ウィンドウです。手前に固定する機能はOSによって異なります。';root.append(note);
+}
+async function openChecklistWindow(mode='raw'){
+ checklistMode=mode;if(activeVideoId)checklistVideoId=activeVideoId;
+ if(checklistWin&&!checklistWin.closed){refreshCompanion();try{checklistWin.focus()}catch(_e){}return}
+ let win=null;checklistWindowType='pip';
+ try{if(window.isSecureContext&&window.documentPictureInPicture?.requestWindow)win=await window.documentPictureInPicture.requestWindow({width:440,height:640})}catch(err){console.warn('Picture-in-Picture',err)}
+ if(!win){checklistWindowType='popup';win=window.open('','sumi_companion','popup,width=470,height=700,scrollbars=yes,resizable=yes')}
+ if(!win){toast('ポップアップを許可してもう一度開いてね');return}
+ checklistWin=win;const d=win.document;d.open();d.write('<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>SumiCraft 小窓チェックリスト</title></head><body><main id="sumiCompanion"></main></body></html>');d.close();
+ const style=d.createElement('style');style.textContent='*{box-sizing:border-box}body{margin:0;background:white;color:#2a362e;font:14px/1.4 system-ui,sans-serif}#sumiCompanion{padding:15px}h1{font-size:16px;margin:0}h2{font-size:13px;margin:12px 0 6px}.progress{color:#267347;font-weight:700;font-size:12px}.options{display:flex;gap:8px;flex-wrap:wrap}.options select{min-width:150px;max-width:100%;flex:1;border:1px solid #cad8ce;border-radius:8px;padding:8px;background:white;color:#293b2c}.bar{height:7px;background:#e6efe7;border-radius:8px;overflow:hidden;margin:12px 0}.bar>div{height:100%;background:#25854c}.list{display:grid;gap:6px}.row{padding:10px 9px;border:1px solid #e0e8e2;border-radius:10px;display:flex;gap:8px;align-items:center}.row.done{background:#ebf7ee;border-color:#b8dcc2}.row input{accent-color:#25854c;width:19px;height:19px;flex-shrink:0}.name{flex:1;font-weight:650;overflow-wrap:anywhere}.done .name{text-decoration:line-through;color:#5e7b65}.number{text-align:right;white-space:nowrap;color:#246b41;font-weight:700}.number small{display:block;color:#647569;font-size:10px;font-weight:400}.note{font-size:11px;color:#647569;margin-top:12px}';d.head.append(style);
+ win.addEventListener('pagehide',()=>{if(checklistWin===win)checklistWin=null});
+ refreshCompanion();
+}
+$('openCompanionHeader').onclick=()=>openChecklistWindow(activeScreen==='guide'?'guide':'raw');
+$('openCompanionVideo').onclick=()=>openChecklistWindow('raw');
+$('openCompanionGuide').onclick=()=>openChecklistWindow('guide');
+document.addEventListener('change',e=>{if(e.target?.matches?.('[data-raw-ready],[data-check-video],[data-ready-id],[data-count-video],#recipeWoodSelect'))setTimeout(refreshCompanion,0)},true);
+window.addEventListener('storage',e=>{if([VIDEO_KEY,GUIDE_KEY].includes(e.key))refreshCompanion()});
+
 try{const saved=localStorage.getItem('sumicraft-v2');if(saved){const old=JSON.parse(saved);suspendLibrary=true;hydrate(old);suspendLibrary=false;const list=getLibrary();let match=list.find(v=>v.data&&v.data.name===state.name&&v.data.blocks?.length===old.blocks?.length);if(match)currentProjectId=match.id;else{currentProjectId=uniqueId();saveCurrentToLibrary(false)}}else{currentProjectId=null;sample();currentProjectId=null}}catch(err){suspendLibrary=false;currentProjectId=null;sample();currentProjectId=null}
 syncDimensions();renderPalette();resize2D();render3D();setScreen('home');for(const id of [...new Set(state.cells)].filter(Boolean).slice(0,25))applyOfficialTextureToAtlas(id);
 })();
