@@ -329,6 +329,16 @@ label,small,.tiny-note,.help,.hint-inline,.page-heading p,.welcome-heading p,.st
 .browse-kit select{width:100%;min-width:0;border-radius:8px;background:white;color:#214b33;border:1px solid #c2dcc7;height:34px;padding:5px;font-size:12px}
 .browse-kit button{background:#e3f4e6;color:#296543;border:1px solid #b6d8c0}
 .browse-kit small{grid-column:1/-1;color:#60786a}
+
+.smart-list-tools{padding:10px;margin:10px 0;background:#f6fbf6;border:1px solid #cbded0;border-radius:11px;color:#244a35}
+.smart-list-tools summary{cursor:pointer;color:#2c7147;font-size:12px;font-weight:800}
+.smart-list-search{margin:8px 0}
+.smart-list-search input,.smart-list-grid select{width:100%;background:white;border:1px solid #bfd9c6;border-radius:8px;color:#214631;padding:7px;font-size:12px}
+.smart-list-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.smart-list-grid label{font-size:11px;color:#37674a;display:grid;gap:3px;min-width:0}
+.smart-list-actions{display:flex;justify-content:space-between;align-items:center;margin-top:9px;gap:8px;font-size:11px}
+.smart-list-actions button{background:#e4f3e6;color:#266d43}
+.smart-list-note{font-size:10px;color:#5d7d69;margin-top:8px}
 </style>
 </head>
 <body>
@@ -1536,6 +1546,32 @@ function smartSelect(id,vals){const e=$(id);for(const [v,label]of Object.entries
 smartSelect("smartMaterial",SMART_MATERIALS);smartSelect("smartShape",SMART_SHAPES);smartSelect("smartColor",SMART_COLORS);smartSelect("smartDimension",SMART_DIM);smartSelect("smartBiome",SMART_BIOMES);
 $("smartSort").onchange=e=>{smartState.sort=e.target.value;renderPalette()};
 $("smartReset").onclick=()=>{for(const k of Object.keys(smartState))smartState[k]=k==="sort"?"name":"all";document.querySelectorAll("#browseKit select").forEach(el=>el.value=el.id==="smartSort"?"name":"all");$("blockSearch").value="";$("blockCategory").value="all";renderPalette()};
+
+
+const LIST_FACETS=[["sort","並べ替え",{countDesc:"必要個数が多い順",countAsc:"必要個数が少ない順",name:"名前順",material:"素材の種類順",shape:"形順",color:"色順",dimension:"ディメンション順",biome:"バイオーム順"}],["material","素材の種類",SMART_MATERIALS],["shape","形",SMART_SHAPES],["color","色",SMART_COLORS],["dimension","ディメンション",SMART_DIM],["biome","バイオーム",SMART_BIOMES]];
+const LIST_SCOPES={materials:[".mat-row",".mat-name",".mat-count"],guideMaterials:[".guide-mat",".guide-mat-name",".guide-mat-count"],guideLayerMaterials:[".guide-layer-row","span:first-child","span:last-child"],videoMaterialRows:[".video-material-row",".video-item-title",".video-item-amount"],recipeRawTotals:[".recipe-raw-row",".recipe-raw-name","strong"]};
+const listStates={};
+function listApply(id){const root=$(id),config=LIST_SCOPES[id],state=listStates[id];if(!root||!state)return;const matches=[];const list=[...root.querySelectorAll(config[0])];for(const row of list){
+ const name=row.querySelector(config[1])?.textContent?.trim()||"",block=BLOCKS.find(b=>b.name===name)||(typeof findMaterialBlock==="function"?findMaterialBlock(name):null)||{name,color:"#aec6bc"},meta=smartProps(block);
+ const text=row.querySelector('input[data-count-video]')?.value||row.querySelector(config[2])?.textContent||"0",number=Number(String(text).match(/[0-9][0-9,]*/)?.[0]?.replaceAll(",","")||0);
+ const match=(!state.text||name.toLowerCase().includes(state.text.toLowerCase())||(block.minecraftId||"").includes(state.text.toLowerCase()))&&["material","shape","color","dimension","biome"].every(k=>state[k]==="all"||state[k]===meta[k]);
+ row.hidden=!match;row.style.display=match?"":"none";if(match)matches.push({row,name,meta,count:number});
+ }
+ matches.sort((a,b)=>{if(state.sort==="countAsc")return a.count-b.count;if(state.sort==="countDesc")return b.count-a.count;return _smartColl.compare(state.sort==="name"?a.name:(a.meta[state.sort]||""),state.sort==="name"?b.name:(b.meta[state.sort]||""))||_smartColl.compare(a.name,b.name)});
+ matches.forEach(x=>root.append(x.row));let label=document.getElementById("smartListCount_"+id);if(label)label.textContent="表示 "+matches.length+" / "+list.length+"種類";
+}
+for(const [id] of Object.entries(LIST_SCOPES)){const root=$(id);if(!root)continue;const state={text:"",sort:"countDesc",material:"all",shape:"all",color:"all",dimension:"all",biome:"all"};listStates[id]=state;
+ const tools=document.createElement("details");tools.className="smart-list-tools";tools.innerHTML='<summary>🔎 ブロックを検索・分類・並べ替え</summary><div class="smart-list-search"><input type="search" placeholder="名前・英語IDで検索" aria-label="ブロック名で絞り込み"></div><div class="smart-list-grid"></div><div class="smart-list-actions"><small id="smartListCount_'+id+'"></small><button type="button">リセット</button></div><p class="smart-list-note">色や主な入手先は目安です。複数地域で入手できる素材もあります。</p>';
+ root.parentNode.insertBefore(tools,root);
+ const input=tools.querySelector('input');input.oninput=()=>{state.text=input.value;listApply(id)};
+ const grid=tools.querySelector('.smart-list-grid');for(const [key,label,options] of LIST_FACETS){let wrap=document.createElement('label');wrap.textContent=label;const select=document.createElement('select');select.dataset.key=key;for(const [val,title] of Object.entries(options))select.add(new Option(title,val));select.value=state[key];select.onchange=()=>{state[key]=select.value;listApply(id)};wrap.append(select);grid.append(wrap)}
+ tools.querySelector('button').onclick=()=>{for(const key of Object.keys(state))state[key]=key==="sort"?"countDesc":key==="text"?"":"all";input.value="";tools.querySelectorAll("select").forEach(e=>e.value=state[e.dataset.key]);listApply(id)};
+}
+const originalCounts=updateCounts;updateCounts=function(){originalCounts();listApply("materials")};
+const originalGuide=renderGuideMaterials;renderGuideMaterials=function(){originalGuide();listApply("guideMaterials");listApply("guideLayerMaterials")};
+const originalStage=renderGuideStage;renderGuideStage=function(){originalStage();listApply("guideLayerMaterials")};
+const originalVideo=renderVideoChecklist;renderVideoChecklist=function(){originalVideo();listApply("videoMaterialRows");listApply("recipeRawTotals")};
+if(typeof renderCraftingSummary==="function"){const originalCraft=renderCraftingSummary;renderCraftingSummary=function(){originalCraft();listApply("recipeRawTotals")}}
 
 try{const saved=localStorage.getItem('sumicraft-v2');if(saved){const old=JSON.parse(saved);suspendLibrary=true;hydrate(old);suspendLibrary=false;const list=getLibrary();let match=list.find(v=>v.data&&v.data.name===state.name&&v.data.blocks?.length===old.blocks?.length);if(match)currentProjectId=match.id;else{currentProjectId=uniqueId();saveCurrentToLibrary(false)}}else{currentProjectId=null;sample();currentProjectId=null}}catch(err){suspendLibrary=false;currentProjectId=null;sample();currentProjectId=null}
 syncDimensions();renderPalette();resize2D();render3D();setScreen('home');for(const id of [...new Set(state.cells)].filter(Boolean).slice(0,25))applyOfficialTextureToAtlas(id);
