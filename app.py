@@ -250,6 +250,9 @@ def app(environ, start_response):
     path = environ.get('PATH_INFO', '/')
     if path == '/' and method in ('GET','HEAD'):
         return respond(start_response, 200, (APP_DIR / 'index.html').read_bytes() if method == 'GET' else b'', 'text/html; charset=utf-8', 'no-cache')
+    if path == '/checklist.html' and method in ('GET','HEAD'):
+        asset = APP_DIR / 'checklist.html'
+        return respond(start_response, 200, asset.read_bytes() if method == 'GET' else b'', 'text/html; charset=utf-8', 'no-cache')
     if path == '/catalog.js' and method in ('GET','HEAD'):
         asset = APP_DIR / 'catalog.js'
         if not asset.is_file():
