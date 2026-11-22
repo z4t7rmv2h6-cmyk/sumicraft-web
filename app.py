@@ -1,4 +1,4 @@
-"""SumiCraft v11: standard-library WSGI site + best-effort YouTube metadata.
+"""SumiCraft v12: standard-library WSGI site + best-effort YouTube metadata.
 
 Gunicorn runs this module's `app` callable on the web host. Visitors do not
 need Python or an API key. YouTube itself may reject automated retrieval.
@@ -211,10 +211,15 @@ def app(environ, start_response):
     path = environ.get('PATH_INFO', '/')
     if path == '/' and method in ('GET','HEAD'):
         return respond(start_response, 200, (APP_DIR / 'index.html').read_bytes() if method == 'GET' else b'', 'text/html; charset=utf-8', 'no-cache')
+    if path == '/catalog.js' and method in ('GET','HEAD'):
+        asset = APP_DIR / 'catalog.js'
+        if not asset.is_file():
+            return json_response(start_response, 503, {'error': 'ブロック一覧を準備中です。'})
+        return respond(start_response, 200, asset.read_bytes() if method == 'GET' else b'', 'application/javascript; charset=utf-8', 'public, max-age=3600')
     if path == '/api/health' and method == 'GET':
         supported = optional_comment_downloader() is not None or optional_yt_dlp() is not None
         return json_response(start_response, 200, {
-            'ok': True, 'extractorAvailable': supported, 'version': 'v11',
+            'ok': True, 'extractorAvailable': supported, 'version': 'v12',
             'message': '取得プログラムの準備ができています。YouTubeからの取得成功は保証されません。' if supported else '自動取得機能を準備中です。',
         })
     if path == '/api/youtube/extract' and method == 'POST':
@@ -247,6 +252,6 @@ def app(environ, start_response):
 if __name__ == '__main__':
     from wsgiref.simple_server import make_server
     port = int(os.environ.get('PORT', '8000'))
-    print(f'SumiCraft v11 (local developer test) http://127.0.0.1:{port}/')
+    print(f'SumiCraft v12 (local developer test) http://127.0.0.1:{port}/')
     with make_server('127.0.0.1', port, app) as server:
         server.serve_forever()
