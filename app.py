@@ -1,8 +1,14 @@
-"""SumiCraft v9: single-origin web app and best-effort YouTube material extraction."""
+"""SumiCraft v11: standard-library WSGI site + best-effort YouTube metadata.
+
+Gunicorn runs this module's `app` callable on the web host. Visitors do not
+need Python or an API key. YouTube itself may reject automated retrieval.
+"""
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from http import HTTPStatus
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -12,13 +18,21 @@ import time
 
 APP_DIR = Path(__file__).resolve().parent
 VIDEO_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
-MAX_COMMENTS = 80
+MAX_COMMENTS = 160
 CACHE_SECONDS = 1200
 CACHE: dict[str, tuple[float, dict]] = {}
 CACHE_LOCK = threading.Lock()
 RATE: dict[str, list[float]] = {}
 RATE_LOCK = threading.Lock()
 EXTRACTION_SLOTS = threading.BoundedSemaphore(2)
+
+
+def optional_comment_downloader():
+    try:
+        from youtube_comment_downloader import YoutubeCommentDownloader, SORT_BY_POPULAR
+        return YoutubeCommentDownloader, SORT_BY_POPULAR
+    except ImportError:
+        return None
 
 
 def optional_yt_dlp():
@@ -61,10 +75,58 @@ def normalize_info(video_id: str, info: dict) -> dict:
     }
 
 
+def extract_comments_without_player(video_id: str) -> dict:
+    """Get public comments without resolving the YouTube video player.
+
+    This can still be blocked by YouTube. Limit comments, size, and work time.
+    """
+    module = optional_comment_downloader()
+    if module is None:
+        raise RuntimeError('コメント直接取得ライブラリが利用できません。')
+    Downloader, POPULAR = module
+    downloader = Downloader()
+    deadline = time.monotonic() + 60
+    comments = []
+    source = downloader.get_comments_from_url(
+        f'https://www.youtube.com/watch?v={video_id}', sort_by=POPULAR)
+    for row in source:
+        if not isinstance(row, dict):
+            continue
+        comments.append({
+            'id': safe_text(row.get('cid') or row.get('id'), 180),
+            'author': safe_text(row.get('author'), 80),
+            'authorId': '',
+            'creator': False,
+            'text': safe_text(row.get('text'), 12000),
+        })
+        if len(comments) >= MAX_COMMENTS or time.monotonic() > deadline:
+            break
+    if not comments:
+        raise RuntimeError('公開コメントが取得できませんでした。')
+    return {
+        'videoId': video_id,
+        'title': f'参考動画 {video_id}',
+        'channelId': '',
+        'description': '',
+        'comments': comments,
+        'commentsChecked': len(comments),
+        'commentsAvailable': True,
+        'source': 'direct-comments',
+        'fetchedAt': datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def extract_video(video_id: str) -> dict:
+    direct_error = None
+    try:
+        return extract_comments_without_player(video_id)
+    except Exception as exc:
+        direct_error = str(exc)[:160]
+        print(f'Comment direct fetch failed for {video_id}: {type(exc).__name__}', flush=True)
     module = optional_yt_dlp()
     if module is None:
-        raise RuntimeError('YouTube取得機能が準備できていません。')
+        raise RuntimeError('YouTubeのコメントを取得できませんでした。現在YouTube側から取得が制限されている可能性があります。画面の一括貼り付けも利用できます。')
+    # Never accept an arbitrary URL. Construct only a canonical youtube URL.
     url = f'https://www.youtube.com/watch?v={video_id}'
     opts = {
         'quiet': True, 'no_warnings': True, 'skip_download': True,
@@ -80,7 +142,8 @@ def extract_video(video_id: str) -> dict:
         with module.YoutubeDL(opts) as downloader:
             info = downloader.extract_info(url, download=False)
     except Exception as exc:
-        raise RuntimeError('YouTubeから情報を取得できませんでした。公開状態やアクセス制限の影響かもしれません。文章のまとめ貼り付けも使えます。') from exc
+        # Do not leak internal stack traces or filesystem paths.
+        raise RuntimeError('YouTubeのコメント取得が2つの方法で失敗しました。公開サーバーからのアクセスが制限されている可能性があります。概要欄・コメントの文章を丸ごと貼り付ける機能は使えます。') from exc
     if not isinstance(info, dict):
         raise RuntimeError('動画情報を取得できませんでした。')
     return normalize_info(video_id, info)
@@ -112,8 +175,9 @@ def cached_extract(video_id: str) -> dict:
 
 
 def rate_ok(environ: dict) -> bool:
+    # Transient only. No IP persistence or storage outside this process.
     ip = environ.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or environ.get('REMOTE_ADDR', 'unknown')
-    key = hashlib.sha256(('sumicraft-v9:' + ip).encode()).hexdigest()[:24]
+    key = hashlib.sha256(('sumicraft-v11:' + ip).encode()).hexdigest()[:24]
     now = time.monotonic()
     with RATE_LOCK:
         times = [t for t in RATE.get(key, []) if now - t < 900]
@@ -142,15 +206,16 @@ def json_response(start_response, status: int, data: dict):
 
 
 def app(environ, start_response):
+    """WSGI callable for Gunicorn. Same origin serves UI and API."""
     method = environ.get('REQUEST_METHOD', 'GET')
     path = environ.get('PATH_INFO', '/')
-    if path == '/' and method == 'GET':
-        return respond(start_response, 200, (APP_DIR / 'index.html').read_bytes(), 'text/html; charset=utf-8', 'no-cache')
+    if path == '/' and method in ('GET','HEAD'):
+        return respond(start_response, 200, (APP_DIR / 'index.html').read_bytes() if method == 'GET' else b'', 'text/html; charset=utf-8', 'no-cache')
     if path == '/api/health' and method == 'GET':
-        supported = optional_yt_dlp() is not None
+        supported = optional_comment_downloader() is not None or optional_yt_dlp() is not None
         return json_response(start_response, 200, {
-            'ok': True, 'extractorAvailable': supported, 'version': 'v9',
-            'message': '自動取得の準備ができています。' if supported else '自動取得機能を準備中です。',
+            'ok': True, 'extractorAvailable': supported, 'version': 'v11',
+            'message': '取得プログラムの準備ができています。YouTubeからの取得成功は保証されません。' if supported else '自動取得機能を準備中です。',
         })
     if path == '/api/youtube/extract' and method == 'POST':
         if 'application/json' not in environ.get('CONTENT_TYPE', '').lower():
@@ -182,6 +247,6 @@ def app(environ, start_response):
 if __name__ == '__main__':
     from wsgiref.simple_server import make_server
     port = int(os.environ.get('PORT', '8000'))
-    print(f'SumiCraft v9 (local developer test) http://127.0.0.1:{port}/')
+    print(f'SumiCraft v11 (local developer test) http://127.0.0.1:{port}/')
     with make_server('127.0.0.1', port, app) as server:
         server.serve_forever()
