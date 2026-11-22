@@ -339,6 +339,19 @@ label,small,.tiny-note,.help,.hint-inline,.page-heading p,.welcome-heading p,.st
 .smart-list-actions{display:flex;justify-content:space-between;align-items:center;margin-top:9px;gap:8px;font-size:11px}
 .smart-list-actions button{background:#e4f3e6;color:#266d43}
 .smart-list-note{font-size:10px;color:#5d7d69;margin-top:8px}
+
+.recipe-raw-row{display:grid;grid-template-columns:22px 38px minmax(0,1fr) auto;gap:8px;align-items:center}
+.recipe-raw-row input[type=checkbox]{width:18px;height:18px;accent-color:#329557}
+.recipe-raw-row.is-ready{background:#e8f7ed;border-color:#91cba1}
+.recipe-raw-row.is-ready .recipe-raw-name{text-decoration:line-through;color:#4d8860}
+.quick-video-filter{border:1px solid #d0e5d2;background:#f8fcf8;border-radius:10px;padding:8px;margin:10px 0}
+.quick-video-filter label{font-size:11px;color:#326246;display:grid;gap:5px}
+.quick-video-filter input[type=search]{background:white;color:#1e4830;border:1px solid #c3dbc8;border-radius:8px;padding:7px;width:100%}
+.quick-video-filter .quick-video-only{display:flex;gap:8px;align-items:center;margin:8px 0}
+.quick-video-only input{accent-color:#329557}
+.video-calculated-quick{display:grid;gap:5px;margin:7px 0}
+.video-calculated-link{text-align:left;color:#24643c;background:#edf7ef;border-color:#cbe0ce;font-size:12px;overflow-wrap:anywhere}
+.video-calculated-link small{color:#5c8064}
 </style>
 </head>
 <body>
@@ -434,7 +447,7 @@ label,small,.tiny-note,.help,.hint-inline,.page-heading p,.welcome-heading p,.st
      <div id="videoMaterialRows" class="video-material-rows"></div>
      <section class="recipe-panel" id="recipeSummaryPanel" aria-labelledby="recipeTitle"><h3 id="recipeTitle">🧰 作るための素材・最終合計</h3><p class="recipe-help">ホッパーやチェストなどの製作レシピを分解して、必要な材料を重複なく合計します。上のチェックリストは完成品、こちらは材料を集めるための一覧だよ。</p>
        <div class="recipe-settings"><label for="recipeWoodSelect">チェストなどに使う板材</label><select id="recipeWoodSelect"><option value="オークの板材">オークの板材</option><option value="トウヒの板材">トウヒの板材</option><option value="シラカバの板材">シラカバの板材</option><option value="サクラの板材">サクラの板材</option><option value="アカシアの板材">アカシアの板材</option><option value="ダークオークの板材">ダークオークの板材</option><option value="マングローブの板材">マングローブの板材</option><option value="ジャングルの板材">ジャングルの板材</option><option value="竹の板材">竹の板材</option></select></div>
-       <div class="recipe-grid"><div class="recipe-group"><h4>① 作るものと必要な中間素材</h4><div id="recipeBreakdown"></div></div><div class="recipe-group"><h4>② 集める材料の最終合計</h4><div id="recipeRawTotals"></div></div></div>
+       <div class="recipe-grid"><div class="recipe-group"><h4>① 作るものと必要な中間素材</h4><div id="recipeBreakdown"></div></div><div class="recipe-group"><h4>② 集める材料の最終合計</h4><p id="recipeDoneCount" class="tiny-note">0 / 0種類 準備済み</p><div id="recipeRawTotals"></div></div></div>
        <button id="recipeCopyTotals" class="recipe-copy" type="button">☷ 最終材料リストをコピー</button><p class="recipe-note">※ レシピ登録済みのアイテムだけ分解。未対応のものは完成品として合計に残します。板材は選択した種類で計算。必要な道具・燃料・製錬・木材の加工は含めません。クラフトの余りは予測しない概算です。</p>
      </section>
      <div class="video-footnote">※ 64個＝1スタックを基本として換算。スタック数が異なるアイテムは個数を確認してね。種類を指定しない木材はオーク、羊毛は白色など代表アイコンを表示します。アイコンはMojang公開の統合版サンプルテクスチャから描画を試みます（対応しているアイテムはMojangのアイテム画像、ブロックは公式の表面画像から独自に生成したプレビューです。完全一致しない場合があります）。取得できない場合は「近似」のプレビューを表示します。<a href="https://github.com/Mojang/bedrock-samples" target="_blank" rel="noopener noreferrer">データ出典：Mojang Bedrock Samples</a>。</div>
@@ -1572,6 +1585,18 @@ const originalGuide=renderGuideMaterials;renderGuideMaterials=function(){origina
 const originalStage=renderGuideStage;renderGuideStage=function(){originalStage();listApply("guideLayerMaterials")};
 const originalVideo=renderVideoChecklist;renderVideoChecklist=function(){originalVideo();listApply("videoMaterialRows");listApply("recipeRawTotals")};
 if(typeof renderCraftingSummary==="function"){const originalCraft=renderCraftingSummary;renderCraftingSummary=function(){originalCraft();listApply("recipeRawTotals")}}
+
+
+let quickTitleFilter="",onlyCalculatedVideos=false;
+const quickVideoHost=$("videoSavedList");
+if(quickVideoHost){const area=document.createElement("div");area.className="quick-video-filter";area.innerHTML='<label>登録動画を探す<input id="videoQuickSearch" type="search" placeholder="動画タイトル・IDを検索"></label><label class="quick-video-only"><input id="videoQuickCalculated" type="checkbox"> 材料計算済みだけ表示</label><strong>📚 材料計算済みの動画</strong><div id="videoCalculatedQuick" class="video-calculated-quick"></div>';quickVideoHost.parentNode.insertBefore(area,quickVideoHost);
+ $("videoQuickSearch").oninput=e=>{quickTitleFilter=e.target.value.trim().toLowerCase();renderVideoLibrary()};
+ $("videoQuickCalculated").onchange=e=>{onlyCalculatedVideos=e.target.checked;renderVideoLibrary()};
+ const originalLibrary=renderVideoLibrary;renderVideoLibrary=function(){originalLibrary();const videos=videoList();let cards=[];
+ for(const v of videos){let match=(!quickTitleFilter||String(v.title).toLowerCase().includes(quickTitleFilter)||v.videoId.includes(quickTitleFilter))&&(!onlyCalculatedVideos||(v.items||[]).length>0);
+ const btn=[...$("videoSavedList").querySelectorAll("[data-vid]")].find(b=>b.dataset.vid===v.id);if(btn){btn.hidden=!match;btn.style.display=match?"":"none"}if(match&&(v.items||[]).length){const total=computedCraftingList(v.items,v.recipeWood||'オークの板材').rows.length;cards.push('<button class="video-calculated-link" data-quick-vid="'+escapeHtml(v.id)+'">'+escapeHtml(v.title)+'　<small>'+total+'種類の材料 →</small></button>')}}$("videoCalculatedQuick").innerHTML=cards.length?cards.join(""):'<p class="tiny-note">計算済みの動画はまだありません。</p>';
+ $("videoCalculatedQuick").querySelectorAll("[data-quick-vid]").forEach(btn=>btn.onclick=()=>{activeVideoId=btn.dataset.quickVid;renderVideoLibrary();requestAnimationFrame(()=>$("recipeSummaryPanel")?.scrollIntoView({behavior:"smooth",block:"start"}))})};
+}
 
 try{const saved=localStorage.getItem('sumicraft-v2');if(saved){const old=JSON.parse(saved);suspendLibrary=true;hydrate(old);suspendLibrary=false;const list=getLibrary();let match=list.find(v=>v.data&&v.data.name===state.name&&v.data.blocks?.length===old.blocks?.length);if(match)currentProjectId=match.id;else{currentProjectId=uniqueId();saveCurrentToLibrary(false)}}else{currentProjectId=null;sample();currentProjectId=null}}catch(err){suspendLibrary=false;currentProjectId=null;sample();currentProjectId=null}
 syncDimensions();renderPalette();resize2D();render3D();setScreen('home');for(const id of [...new Set(state.cells)].filter(Boolean).slice(0,25))applyOfficialTextureToAtlas(id);
