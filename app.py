@@ -15,6 +15,8 @@ from pathlib import Path
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 
 APP_DIR = Path(__file__).resolve().parent
 VIDEO_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
@@ -205,6 +207,43 @@ def json_response(start_response, status: int, data: dict):
     return respond(start_response, status, json.dumps(data, ensure_ascii=False).encode('utf-8'), 'application/json; charset=utf-8')
 
 
+
+# Vanilla assets are loaded only from Mojang's public sample resource_pack.
+# Do not accept arbitrary URLs. Keep a bounded in-memory cache per worker.
+VANILLA_ROOT = 'https://raw.githubusercontent.com/Mojang/bedrock-samples/main/resource_pack/'
+VANILLA_ALLOWED = re.compile(
+    r'(?:blocks\.json|textures/(?:terrain_texture|item_texture)\.json|textures/(?:blocks|items)/[a-zA-Z0-9_.-]+\.png)\Z'
+)
+VANILLA_CACHE: dict[str, tuple[float, bytes, str]] = {}
+VANILLA_LOCK = threading.Lock()
+
+def get_vanilla_asset(subpath: str) -> tuple[bytes, str]:
+    if len(subpath) > 150 or not VANILLA_ALLOWED.fullmatch(subpath):
+        raise ValueError('Invalid vanilla asset path')
+    now = time.monotonic()
+    with VANILLA_LOCK:
+        record = VANILLA_CACHE.get(subpath)
+        if record and record[0] > now:
+            return record[1], record[2]
+    request = urllib.request.Request(
+        VANILLA_ROOT + subpath,
+        headers={'User-Agent': 'SumiCraft/1.0 (Minecraft Bedrock reference)', 'Accept': 'image/png, application/json'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            limit = 650000 if subpath.endswith('.json') else 1100000
+            data = response.read(limit + 1)
+            if len(data) > limit or not data:
+                raise RuntimeError('Texture reference file is unavailable')
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError('公式サンプル画像を取得できませんでした') from exc
+    ctype = 'image/png' if subpath.endswith('.png') else 'application/json; charset=utf-8'
+    with VANILLA_LOCK:
+        if len(VANILLA_CACHE) >= 450:
+            VANILLA_CACHE.clear()
+        VANILLA_CACHE[subpath] = (now + 21600, data, ctype)
+    return data, ctype
+
 def app(environ, start_response):
     """WSGI callable for Gunicorn. Same origin serves UI and API."""
     method = environ.get('REQUEST_METHOD', 'GET')
@@ -216,6 +255,19 @@ def app(environ, start_response):
         if not asset.is_file():
             return json_response(start_response, 503, {'error': 'ブロック一覧を準備中です。'})
         return respond(start_response, 200, asset.read_bytes() if method == 'GET' else b'', 'application/javascript; charset=utf-8', 'public, max-age=3600')
+    if path.startswith('/api/vanilla/') and method in ('GET','HEAD'):
+        subpath = path[len('/api/vanilla/'):]
+        try:
+            if method == 'HEAD':
+                if not VANILLA_ALLOWED.fullmatch(subpath):
+                    return json_response(start_response, 400, {'error':'Invalid vanilla asset path'})
+                return respond(start_response, 200, b'', 'image/png' if subpath.endswith('.png') else 'application/json; charset=utf-8', 'public, max-age=3600')
+            data, ctype = get_vanilla_asset(subpath)
+            return respond(start_response, 200, data, ctype, 'public, max-age=21600')
+        except ValueError as exc:
+            return json_response(start_response, 400, {'error':str(exc)})
+        except RuntimeError as exc:
+            return json_response(start_response, 502, {'error':str(exc)})
     if path == '/api/health' and method == 'GET':
         supported = optional_comment_downloader() is not None or optional_yt_dlp() is not None
         return json_response(start_response, 200, {
