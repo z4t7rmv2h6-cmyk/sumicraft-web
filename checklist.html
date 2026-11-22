@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#ffffff"><title>SumiCraft | 小窓チェックリスト</title>
+<style>
+*{box-sizing:border-box}body{background:white;color:#1d2c22;margin:0;font:14px/1.5 system-ui,"Yu Gothic",sans-serif}main{max-width:640px;margin:auto;padding:16px}.head{display:flex;align-items:center;justify-content:space-between;gap:7px}h1{font-size:17px;color:#205738;margin:0}p{margin:3px 0}.tip{font-size:11px;color:#607369}.controls{display:flex;gap:7px;margin:15px 0 9px;flex-wrap:wrap}select,input[type=search]{background:#fff;color:#244532;border:1px solid #c9d9cc;border-radius:10px;padding:10px;min-width:0}select{flex:1}input[type=search]{width:100%;font-size:13px}.summary{padding:12px 0 5px;border-top:1px solid #e3e9e3}h2{font-size:15px;margin:0;color:#1f432e}.summary #status{font-size:12px;font-weight:750;color:#28764b}.rail{height:8px;background:#e5eee6;border-radius:20px;overflow:hidden;margin:8px 0 12px}.rail div{height:100%;background:#309158;transition:width .1s}.items{display:grid;gap:7px}.item{display:flex;gap:9px;align-items:center;padding:12px;border:1px solid #dee7e0;border-radius:11px;cursor:pointer;background:white}.item.is-ready{background:#e9f7ec;border-color:#a8d2b6}.item input{width:20px;height:20px;flex:none;accent-color:#298b50}.name{font-weight:670;flex:1;overflow-wrap:anywhere}.item.is-ready .name{text-decoration:line-through;color:#547761}.quantity{text-align:right;font-weight:750;color:#205e39;min-width:85px}.quantity small{display:block;color:#69786e;font-weight:400;font-size:10px}.empty{color:#66776b;text-align:center;padding:24px 8px}.tipbottom{font-size:11px;color:#65736b;margin:14px 0}.btn{padding:8px 10px;border:1px solid #bcd8c4;background:#fff;color:#275e3a;border-radius:9px;cursor:pointer}#error{color:#ba514b;font-size:12px}</style></head>
+<body><main><div class="head"><h1>☑ SumiCraft 小窓</h1><button class="btn" id="refresh">↻ 更新</button></div><p class="tip">マイクラをウィンドウモードで開き、並べて使えるチェックリストです。</p><div class="controls"><select id="viewMode" aria-label="リストの種類"><option value="raw">素材の最終合計</option><option value="finished">動画の完成品</option><option value="guide">設計・建築ガイド</option></select><select id="videoPicker" aria-label="動画を選ぶ"></select></div><input id="search" type="search" placeholder="🔍 素材を検索"><section class="summary"><h2 id="projectTitle">チェックリスト</h2><p id="subtitle" class="tip"></p><p id="status"></p><div class="rail"><div id="progress"></div></div></section><div id="list" class="items"></div><p id="error"></p><p class="tipbottom">チェックはこのブラウザに保存します。別PCには同期されません。小窓はChromeの通常ウィンドウであり、ゲームの排他的フルスクリーンでは隠れることがあります。</p></main><script>
+(() => {
+'use strict';
+const byId=id=>document.getElementById(id),VKEY='sumicraft-video-materials-v1',GKEY='sumicraft-ready-v1',SNAP='sumicraft-companion-guide-v19';
+const RECIPE_RULES={
+ 'ホッパー':{parts:[['鉄インゴット',5],['チェスト',1]],name:'ホッパー'},
+ 'チェスト':{parts:[['$planks',8]],name:'チェスト'},
+ 'ピストン':{parts:[['$planks',3],['丸石',4],['鉄インゴット',1],['レッドストーンダスト',1]],name:'ピストン'},
+ '粘着ピストン':{parts:[['ピストン',1],['スライムボール',1]],name:'粘着ピストン'},
+ 'ドロッパー':{parts:[['丸石',7],['レッドストーンダスト',1]],name:'ドロッパー'},
+ 'ディスペンサー':{parts:[['丸石',7],['レッドストーンダスト',1],['弓',1]],name:'ディスペンサー'},
+ 'かまど':{parts:[['丸石',8]],name:'かまど'},
+ '作業台':{parts:[['$planks',4]],name:'作業台'},
+ '鉄ブロック':{parts:[['鉄インゴット',9]],name:'鉄ブロック'},
+ 'バケツ':{parts:[['鉄インゴット',3]],name:'バケツ'}
+};
+const RECIPE_ALIASES={
+ 'hopper':'ホッパー','ホッパー':'ホッパー',
+ 'chest':'チェスト','チェスト':'チェスト',
+ 'piston':'ピストン','ピストン':'ピストン',
+ 'sticky_piston':'粘着ピストン','粘着ピストン':'粘着ピストン',
+ 'dropper':'ドロッパー','ドロッパー':'ドロッパー',
+ 'dispenser':'ディスペンサー','ディスペンサー':'ディスペンサー',
+ 'furnace':'かまど','かまど':'かまど',
+ 'crafting_table':'作業台','作業台':'作業台',
+ 'iron_block':'鉄ブロック','鉄ブロック':'鉄ブロック',
+ 'bucket':'バケツ','バケツ':'バケツ',
+ 'iron_ingot':'鉄インゴット','鉄インゴット':'鉄インゴット',
+ 'cobblestone':'丸石','丸石':'丸石',
+ 'redstone':'レッドストーンダスト','redstone_dust':'レッドストーンダスト','レッドストーン':'レッドストーンダスト','レッドストーンダスト':'レッドストーンダスト',
+ 'slime_ball':'スライムボール','スライムボール':'スライムボール',
+ 'bow':'弓','弓':'弓'
+};
+function canonicalRecipeName(name){const raw=String(name||'').normalize('NFKC').trim().replace(/^minecraft:/i,'');return RECIPE_ALIASES[raw.toLowerCase()]||RECIPE_ALIASES[raw]||raw;}
+function computedCraftingList(items,wood){
+ const totals=new Map(),crafted=new Map(),details=new Map(),direct=new Map();
+ const increase=(map,key,n)=>map.set(key,(map.get(key)||0)+n);
+ const plank=wood||'オークの板材';
+ const expand=(name,count,depth=0)=>{
+  if(!Number.isFinite(count)||count<=0)return;
+  if(depth>9){increase(totals,name,count);return}
+  const canonical=canonicalRecipeName(name),rule=RECIPE_RULES[canonical];
+  if(!rule){increase(totals,canonical,count);return}
+  increase(crafted,canonical,count);
+  const ingredients=rule.parts.map(([part,multiple])=>[part==='$planks'?plank:part,count*multiple]);
+  for(const [part,n] of ingredients)expand(part,n,depth+1);
+  const merged=new Map(details.get(canonical)||[]);for(const [part,n] of ingredients)merged.set(part,(merged.get(part)||0)+n);details.set(canonical,[...merged]);
+ };
+ for(const row of items||[]){const count=Math.max(0,Math.round(Number(row.count)||0));if(!count)continue;const name=canonicalRecipeName(row.name);increase(direct,name,count)}
+ for(const [name,count] of direct)expand(name,count);
+ const rows=[...totals].map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name,'ja'));
+ const recipeRows=[...crafted].map(([name,count])=>({name,count,ingredients:details.get(name)||[]}));
+ return {rows,recipeRows};
+}
+
+const url=new URLSearchParams(location.search);
+let mode=['raw','finished','guide'].includes(url.get('mode'))?url.get('mode'):'raw';
+let selectedVideo=url.get('video')||'';
+const keyName=n=>String(n||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'').trim();
+function videos(){try{return JSON.parse(localStorage.getItem(VKEY)||'[]').filter(v=>v&&v.id)}catch{return []}}
+function guideSnapshot(){try{return JSON.parse(localStorage.getItem(SNAP)||'null')}catch{return null}}
+function guideReady(project){try{return JSON.parse(localStorage.getItem(GKEY)||'{}')[project]||{}}catch{return {}}}
+const stacks=n=>n>=64?(Math.floor(n/64)+'スタック'+(n%64?'＋'+(n%64)+'個':'')):(n+'個');
+function saveVideo(vs){localStorage.setItem(VKEY,JSON.stringify(vs))}
+function selectRows(vs){
+ const picked=vs.find(v=>v.id===selectedVideo)||vs[0];if(picked)selectedVideo=picked.id;
+ if(mode==='guide'){const data=guideSnapshot();if(!data||!Array.isArray(data.rows))return {title:'設計の材料',rows:[],hint:'SumiCraftで設計を選んで「小窓」を開いてね。',video:null};
+ const ready=guideReady(data.projectId||'draft');return {title:data.title||'設計の材料',rows:data.rows.map(r=>({...r,checked:Number(ready[r.key])===r.count})),hint:'建築ガイドのチェックと連動',video:null,projectId:data.projectId||'draft'};}
+ if(!picked)return {title:'動画がありません',rows:[],hint:'SumiCraftで動画を登録してね。',video:null};
+ if(mode==='finished')return {title:picked.title,rows:(picked.items||[]).map(r=>({name:r.name,key:String(r.id),count:Math.max(0,Number(r.count)||0),checked:!!r.ready})),hint:'登録した完成品の一覧',video:picked};
+ const total=computedCraftingList(picked.items||[],picked.recipeWood||'オークの板材');
+ return {title:picked.title,rows:total.rows.map(r=>({...r,key:keyName(r.name),checked:Number(picked.rawReady?.[keyName(r.name)])===r.count})),hint:'クラフト後に必要な素材の合計',video:picked};
+}
+function clearChildren(node){while(node.firstChild)node.firstChild.remove()}
+function node(tag,text,className){const el=document.createElement(tag);if(text!=null)el.textContent=text;if(className)el.className=className;return el}
+function render(){
+ const vs=videos(),content=selectRows(vs),rows=content.rows,done=rows.filter(r=>r.checked).length;
+ byId('viewMode').value=mode;
+ const picker=byId('videoPicker');clearChildren(picker);
+ if(mode==='guide'){picker.hidden=true}else{picker.hidden=false;for(const v of vs){const opt=node('option',v.title||'参考動画');opt.value=v.id;picker.append(opt)}picker.value=selectedVideo}
+ byId('projectTitle').textContent=content.title||'チェックリスト';
+ byId('subtitle').textContent=content.hint;
+ byId('status').textContent=`${done} / ${rows.length} 種類 準備済み`;
+ byId('progress').style.width=rows.length?Math.round(done/rows.length*100)+'%':'0%';
+ const q=byId('search').value.normalize('NFKC').toLowerCase().trim();const list=byId('list');clearChildren(list);
+ for(const r of rows){if(q&&!r.name.normalize('NFKC').toLowerCase().includes(q))continue;
+ const label=node('label',null,'item'+(r.checked?' is-ready':''));const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=r.checked;checkbox.setAttribute('aria-label',r.name+' 準備済み');
+ checkbox.onchange=()=>{
+ try{if(mode==='guide'){
+  const all=JSON.parse(localStorage.getItem(GKEY)||'{}'),id=content.projectId||'draft';all[id] ||= {};if(checkbox.checked)all[id][r.key]=r.count;else delete all[id][r.key];localStorage.setItem(GKEY,JSON.stringify(all));
+ }else{
+  const all=videos(),v=all.find(v=>v.id===selectedVideo);if(!v)return;
+  if(mode==='finished'){const x=(v.items||[]).find(x=>String(x.id)===r.key);if(x)x.ready=checkbox.checked;}
+  else{v.rawReady ||= {};if(checkbox.checked)v.rawReady[r.key]=r.count;else delete v.rawReady[r.key];}saveVideo(all);
+ }render();
+ }catch(error){byId('error').textContent='保存できませんでした: '+error.message}
+ };
+ const name=node('span',r.name,'name');const count=node('span',`${r.count.toLocaleString('ja-JP')}個`,'quantity');count.append(node('small',stacks(r.count)));
+ label.append(checkbox,name,count);list.append(label);
+ }
+ if(!list.children.length){list.append(node('p',rows.length?'検索に一致する材料はありません。':'まだ材料がありません。','empty'))}
+}
+byId('viewMode').addEventListener('change',e=>{mode=e.target.value;render()});
+byId('videoPicker').addEventListener('change',e=>{selectedVideo=e.target.value;render()});
+byId('search').addEventListener('input',render);
+byId('refresh').addEventListener('click',render);
+window.addEventListener('storage',e=>{if([VKEY,GKEY,SNAP].includes(e.key))render()});
+window.addEventListener('focus',render);
+render();
+})()
+</script></body></html>
