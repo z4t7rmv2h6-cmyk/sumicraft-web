@@ -253,6 +253,11 @@ def app(environ, start_response):
     if path == '/checklist.html' and method in ('GET','HEAD'):
         asset = APP_DIR / 'checklist.html'
         return respond(start_response, 200, asset.read_bytes() if method == 'GET' else b'', 'text/html; charset=utf-8', 'no-cache')
+    if path == '/ja_names.js' and method in ('GET','HEAD'):
+        asset = APP_DIR / 'ja_names.js'
+        if not asset.is_file():
+            return json_response(start_response, 503, {'error':'日本語名データが準備できていません'})
+        return respond(start_response, 200, asset.read_bytes() if method == 'GET' else b'', 'application/javascript; charset=utf-8', 'public, max-age=3600')
     if path == '/catalog.js' and method in ('GET','HEAD'):
         asset = APP_DIR / 'catalog.js'
         if not asset.is_file():
