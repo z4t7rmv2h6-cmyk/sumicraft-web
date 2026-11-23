@@ -686,6 +686,37 @@ body.v21-editor #v21LayerSheet{
 }
 @media(max-width:360px){#v22Hotbar .v22-inventory{gap:1px;padding:2px}#v22Hotbar .v22-slot-number{font-size:8px}}
 
+
+/* v26 creative-inventory sidebar */
+#v26InventoryShell{display:grid;grid-template-columns:59px minmax(0,1fr);gap:7px;min-height:0;max-height:72dvh;flex:1}
+#v26InventoryRail{display:flex;flex-direction:column;gap:5px;padding:5px;background:#f5f6f5;border:1px solid #dfe5df;border-radius:11px;overflow-y:auto;min-height:0}
+#v26InventoryRail button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-height:46px;padding:2px;border:1px solid #e2e8e3!important;background:white!important;color:#365142!important;border-radius:8px;touch-action:manipulation}
+#v26InventoryRail button span:first-child{font-size:19px;line-height:1.25}
+#v26InventoryRail button span:last-child{font-size:10px;font-weight:750}
+#v26InventoryRail button[aria-pressed=true]{background:#e3f5e9!important;border:2px solid #39965f!important}
+#v26InventoryMain{display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0;overflow:hidden}
+#v26InventoryHead{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:33px}
+#v26InventoryHead strong{font-size:14px;color:#26392e}
+#v26InventoryHead small{font-size:10px;color:#637069}
+#v26InventorySearchPanel[hidden],#v26InventoryMain #palette[hidden],#v26InventoryMain #paletteResults[hidden],#v26InventoryMain #itemRegistryBox[hidden],#v26InventoryMain #paletteShowMore[hidden],#v26InventoryMain .chosen[hidden]{display:none!important}
+#v26InventorySearchPanel{display:grid;gap:3px}
+#v26InventorySearchPanel #blockSearch{margin:0}
+#v26InventorySearchPanel .v19-quick-blocks{display:flex;overflow-x:auto;gap:4px;margin:0}
+#v26InventoryMain #palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:5px;align-content:start;overflow-y:auto;min-height:80px;max-height:min(49dvh,445px);padding:5px;margin:0;background:#fff!important;flex:1}
+#v26InventoryMain #palette .swatch{display:flex;flex-direction:column;gap:2px;justify-content:flex-start;min-height:77px;aspect-ratio:auto;padding:3px}
+#v26InventoryMain .material-palette-canvas{width:44px;height:44px;image-rendering:pixelated}
+#v26InventoryMain .material-palette-name{font-size:9px;white-space:normal;max-height:25px;line-height:1.3;overflow:hidden;text-align:center}
+#v26InventoryMain .material-palette-shape{display:none}
+#v26InventoryMain #paletteResults{margin:0;font-size:10px}
+#v26InventoryMain .chosen{margin:0;padding:5px}
+#v26InventoryMain .chosen .chosen-square{display:none}
+#v26InventoryMain #chosenBlockPreview{width:45px;height:45px}
+#v26InventoryMain #itemRegistryBox{display:block;min-height:0;overflow-y:auto;flex:1}
+body.v21-editor.v21-panel-block #pageEditor>.left{overflow:hidden!important}
+body.v21-editor.v21-panel-block #pageEditor>.left>section:nth-of-type(2){display:flex!important;flex-direction:column;overflow:hidden;height:calc(100% - 65px);min-height:0;margin:6px 0!important;padding:8px!important}
+body.v21-editor.v21-panel-block #pageEditor>.left>section:nth-of-type(2)>:not(.section-title):not(#v26InventoryShell){display:none!important}
+body.v21-editor #pageEditor .left #palette{max-height:none!important}
+@media(max-width:720px){#v26InventoryShell{grid-template-columns:51px minmax(0,1fr);gap:5px;max-height:100%}#v26InventoryRail{max-height:100%;padding:3px}#v26InventoryRail button{min-height:43px}#v26InventoryRail button span:first-child{font-size:18px}#v26InventoryRail button span:last-child{font-size:9px}#v26InventoryMain #palette{max-height:none;grid-template-columns:repeat(auto-fill,minmax(49px,1fr))}#v26InventoryMain .material-palette-canvas{width:40px;height:40px}}
 </style>
 </head>
 <body>
@@ -2659,7 +2690,35 @@ v22UpdateHotbar();
 const v21OriginalSetScreen=setScreen;
 setScreen=function(where){v21OriginalSetScreen(where);v21ShowScreen(where)};
 v21ShowScreen(activeScreen);
-
+// v26: dedicated sidebar category navigation and searchable palette.
+(function(){
+ const sec=document.querySelector('#pageEditor>.left>section:nth-of-type(2)'),shell=document.createElement('div');shell.id='v26InventoryShell';
+ const nav=document.createElement('nav');nav.id='v26InventoryRail';nav.setAttribute('aria-label','ブロック・アイテムカテゴリ');
+ const area=document.createElement('div');area.id='v26InventoryMain';
+ const header=document.createElement('div');header.id='v26InventoryHead';header.innerHTML='<strong id="v26CategoryTitle">構築</strong><small id="v26CategoryHint">カテゴリから選ぶ</small>';
+ const sp=document.createElement('div');sp.id='v26InventorySearchPanel';sp.hidden=true;
+ const cats=[['construction','🧱','構築'],['nature','🌿','自然'],['functional','⚙️','機能'],['redstone','⚡','回路'],['color','🎨','色'],['all','▦','すべて'],['items','🎒','アイテム'],['search','🔍','検索']];
+ const search=$('blockSearch'),select=$('blockCategory'),palette=$('palette'),count=$('paletteResults'),more=$('paletteShowMore'),items=$('itemRegistryBox'),chosen=sec.querySelector('.chosen'),shape=$('blockShapeOptions');
+ sp.append(search,sec.querySelector('.v19-quick-blocks'));
+ select.value='all';select.hidden=true;
+ area.append(header,sp,select,$('paletteBrowseControls'),count,palette,more,items,chosen,shape);
+ shell.append(nav,area);sec.append(shell);
+ sec.querySelector('.section-title h2').textContent='クリエイティブインベントリ';
+ sec.querySelector('.section-title .eyebrow').textContent='BLOCKS';
+ function choose(k){
+  window.SUMICRAFT_V26_CATEGORY=k;
+  for(const b of nav.querySelectorAll('button'))b.setAttribute('aria-pressed',String(b.dataset.cat===k));
+  $('v26CategoryTitle').textContent=cats.find(x=>x[0]===k)?.[2]||'構築';
+  $('v26CategoryHint').textContent=k==='search'?'名前・IDで検索':k==='items'?'道具・素材・食料':'タップして選択';
+  sp.hidden=k!=='search';items.hidden=k!=='items';palette.hidden=k==='items';count.hidden=k==='items';more.hidden=k==='items';chosen.hidden=k==='items';
+  if(k==='items'){items.open=true;renderItemRegistry()}
+  else{search.value='';select.value='all';palettePageSize=96;renderPalette();updateBlockShapeControls()}
+  if(k==='search')requestAnimationFrame(()=>search.focus({preventScroll:true}));
+  palette.scrollTop=0;
+ }
+ for(const [key,ico,label] of cats){const b=document.createElement('button');b.type='button';b.dataset.cat=key;b.innerHTML='<span aria-hidden="true">'+ico+'</span><span>'+label+'</span>';b.setAttribute('aria-label',label);b.onclick=()=>choose(key);nav.append(b)}
+ choose('construction');
+})();
 })();
 </script>
 </body>
